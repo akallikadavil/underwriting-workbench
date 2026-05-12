@@ -1,0 +1,348 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  MARKETING
+  UNDERWRITER
+  SENIOR_UNDERWRITER
+  POLICY_PROCESSING
+  IT_ADMIN
+  COMPLIANCE
+  MANAGEMENT
+}
+
+enum BusinessType {
+  DIRECT_INSURANCE
+  REINSURANCE_INWARD
+}
+
+enum TransactionType {
+  NEW_BUSINESS
+  RENEWAL
+  ENDORSEMENT
+}
+
+enum ProductType {
+  INDUSTRIAL_ALL_RISKS
+  MOVEABLE_ALL_RISKS
+  ERECTION_ALL_RISKS
+  CONTRACTOR_WORKS
+  PRODUCT_LIABILITY
+  GENERAL_LIABILITY
+  PUBLIC_LIABILITY
+  MANAGEMENT_LIABILITY
+  CYBER_RISK
+  CYBER_INSURANCE
+}
+
+enum SubmissionStatus {
+  DRAFT
+  SUBMITTED
+  INTAKE_VALIDATION
+  PENDING_INFORMATION
+  ASSIGNED_TO_UNDERWRITING
+  UNDERWRITING_REVIEW
+  REFERRAL_REQUIRED
+  SENIOR_REVIEW
+  APPROVED_FOR_QUOTE
+  DECLINED
+  APPROVED_FOR_POLICY_PROCESSING
+  CORE_ENTRY_PENDING
+  CORE_ENTRY_COMPLETED
+  CLOSED
+}
+
+enum ExtractionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum AIRecommendationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EDITED
+}
+
+enum RuleType {
+  REFERRAL
+  BLOCK
+  WARNING
+  INFO
+}
+
+enum RuleSeverity {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum ReferralStatus {
+  PENDING
+  APPROVED
+  APPROVED_WITH_CONDITIONS
+  RETURNED
+  DECLINED
+}
+
+enum ComplianceStatus {
+  CLEAR
+  BLOCKED
+  REVIEW_REQUIRED
+  APPROVED
+}
+
+enum CoreEntryStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  RETURNED
+}
+
+enum DocumentCategory {
+  PROPOSAL_FORM
+  SITE_SURVEY
+  LOSS_HISTORY
+  REINSURANCE_SLIP
+  FINANCIAL_STATEMENTS
+  RISK_ASSESSMENT
+  MFA_DOCUMENTATION
+  INCIDENT_RESPONSE_PLAN
+  PRIOR_POLICY
+  ENDORSEMENT_REQUEST
+  COMPLIANCE_DOCUMENT
+  OTHER
+}
+
+model User {
+  id          String   @id @default(cuid())
+  name        String
+  email       String   @unique
+  password    String
+  role        UserRole
+  department  String?
+  country     String   @default("TH")
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  submissionsCreated   Submission[]          @relation("CreatedBy")
+  submissionsAssigned  Submission[]          @relation("AssignedTo")
+  documentsUploaded    Document[]
+  aiApprovals          AIRecommendation[]
+  referralsMade        Referral[]            @relation("ReferredBy")
+  referralsReceived    Referral[]            @relation("ReferredTo")
+  complianceApprovals  ComplianceRecord[]
+  policyProcessed      PolicyProcessingRecord[]
+  auditLogs            AuditLog[]
+  notifications        Notification[]
+}
+
+model Submission {
+  id                  String           @id @default(cuid())
+  submissionNumber    String           @unique
+  businessType        BusinessType
+  transactionType     TransactionType
+  productType         ProductType
+  productSubtype      String?
+  insuredName         String
+  sourceType          String           @default("BROKER")
+  brokerName          String?
+  policyStartDate     DateTime?
+  policyEndDate       DateTime?
+  sumInsured          Float
+  currency            String           @default("THB")
+  industry            String?
+  riskLocation        String
+  priorClaimsCount    Int              @default(0)
+  priorClaimsAmount   Float            @default(0)
+  status              SubmissionStatus @default(DRAFT)
+  assignedToUserId    String?
+  createdByUserId     String
+  riskScore           Float?
+  completenessScore   Float?
+  slaDueDate          DateTime?
+  referralRequired    Boolean          @default(false)
+  complianceBlocked   Boolean          @default(false)
+  notes               String?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  assignedTo          User?            @relation("AssignedTo", fields: [assignedToUserId], references: [id])
+  createdBy           User             @relation("CreatedBy", fields: [createdByUserId], references: [id])
+  documents           Document[]
+  aiRecommendations   AIRecommendation[]
+  ruleResults         RuleResult[]
+  complianceRecord    ComplianceRecord?
+  referrals           Referral[]
+  policyProcessing    PolicyProcessingRecord?
+  auditLogs           AuditLog[]       @relation("SubmissionAudit")
+  notifications       Notification[]
+}
+
+model Document {
+  id               String           @id @default(cuid())
+  submissionId     String
+  fileName         String
+  fileType         String
+  filePath         String
+  documentCategory DocumentCategory
+  uploadedByUserId String
+  extractedText    String?
+  extractionStatus ExtractionStatus @default(PENDING)
+  createdAt        DateTime         @default(now())
+
+  submission       Submission       @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  uploadedBy       User             @relation(fields: [uploadedByUserId], references: [id])
+  aiRecommendations AIRecommendation[] @relation("SourceDocument")
+}
+
+model AIRecommendation {
+  id                  String                 @id @default(cuid())
+  submissionId        String
+  agentName           String
+  recommendationType  String
+  recommendationText  String
+  rationale           String
+  sourceDocumentId    String?
+  confidenceScore     Float
+  status              AIRecommendationStatus @default(PENDING)
+  approvedByUserId    String?
+  editedText          String?
+  createdAt           DateTime               @default(now())
+
+  submission          Submission             @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  sourceDocument      Document?              @relation("SourceDocument", fields: [sourceDocumentId], references: [id])
+  approvedBy          User?                  @relation(fields: [approvedByUserId], references: [id])
+}
+
+model Rule {
+  id            String       @id @default(cuid())
+  ruleName      String
+  productType   ProductType?
+  country       String       @default("TH")
+  ruleType      RuleType
+  conditionJson Json
+  actionJson    Json
+  severity      RuleSeverity
+  active        Boolean      @default(true)
+  description   String?
+  createdAt     DateTime     @default(now())
+
+  ruleResults   RuleResult[]
+}
+
+model RuleResult {
+  id           String   @id @default(cuid())
+  submissionId String
+  ruleId       String
+  triggered    Boolean
+  message      String
+  severity     RuleSeverity
+  createdAt    DateTime @default(now())
+
+  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  rule         Rule       @relation(fields: [ruleId], references: [id])
+}
+
+model ComplianceRecord {
+  id                        String           @id @default(cuid())
+  submissionId              String           @unique
+  consentCaptured           Boolean          @default(false)
+  privacyNoticeAcknowledged Boolean          @default(false)
+  sensitiveDataPresent      Boolean          @default(false)
+  sensitiveDataType         String?
+  legalBasis                String?
+  crossBorderTransferRequired Boolean        @default(false)
+  dataRetentionClass        String?
+  humanReviewCompleted      Boolean          @default(false)
+  complianceApprovedByUserId String?
+  complianceStatus          ComplianceStatus @default(REVIEW_REQUIRED)
+  notes                     String?
+  createdAt                 DateTime         @default(now())
+  updatedAt                 DateTime         @updatedAt
+
+  submission                Submission       @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  approvedBy                User?            @relation(fields: [complianceApprovedByUserId], references: [id])
+}
+
+model Referral {
+  id               String         @id @default(cuid())
+  submissionId     String
+  referredByUserId String
+  referredToUserId String?
+  referralReason   String
+  referralStatus   ReferralStatus @default(PENDING)
+  seniorDecision   String?
+  decisionNotes    String?
+  conditions       String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  submission       Submission     @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  referredBy       User           @relation("ReferredBy", fields: [referredByUserId], references: [id])
+  referredTo       User?          @relation("ReferredTo", fields: [referredToUserId], references: [id])
+}
+
+model PolicyProcessingRecord {
+  id                  String          @id @default(cuid())
+  submissionId        String          @unique
+  coreEntryStatus     CoreEntryStatus @default(PENDING)
+  csvExported         Boolean         @default(false)
+  jsonExported        Boolean         @default(false)
+  enteredByUserId     String?
+  coreReferenceNumber String?
+  completedAt         DateTime?
+  createdAt           DateTime        @default(now())
+
+  submission          Submission      @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  enteredBy           User?           @relation(fields: [enteredByUserId], references: [id])
+}
+
+model AuditLog {
+  id                String     @id @default(cuid())
+  userId            String?
+  entityType        String
+  entityId          String
+  action            String
+  previousValueJson Json?
+  newValueJson      Json?
+  ipAddress         String?
+  timestamp         DateTime   @default(now())
+
+  user              User?      @relation(fields: [userId], references: [id])
+  submission        Submission? @relation("SubmissionAudit", fields: [entityId], references: [id])
+}
+
+model Notification {
+  id           String   @id @default(cuid())
+  userId       String
+  submissionId String?
+  message      String
+  read         Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  user         User       @relation(fields: [userId], references: [id])
+  submission   Submission? @relation(fields: [submissionId], references: [id])
+}
+
+model ASEANConfig {
+  id                  String   @id @default(cuid())
+  country             String   @unique
+  currency            String
+  language            String
+  regulatoryChecklist Json?
+  consentRules        Json?
+  dataResidency       String?
+  taxFields           Json?
+  coreMapping         Json?
+  active              Boolean  @default(true)
+  updatedAt           DateTime @updatedAt
+}
